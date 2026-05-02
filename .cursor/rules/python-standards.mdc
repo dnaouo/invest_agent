@@ -1,0 +1,47 @@
+---
+description: Python 代码规范（Karpathy 准则适配）
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Python 代码规范
+
+## 简洁优先
+
+- 能 50 行解决的不写 200 行
+- 单一用途代码不搞抽象
+- 不加未被要求的"灵活性"和"可配置性"
+- 不为不可能的场景写错误处理
+
+## 手术式修改
+
+- 只改必须改的，不"顺手改进"相邻代码
+- 匹配现有风格，即使你觉得可以更好
+- 你的修改导致的孤儿 import/变量/函数，自己清理
+- 发现无关死代码，提一嘴但不删
+
+## 代码风格
+
+- 类型注解：所有公开函数的参数和返回值必须有类型注解
+- docstring：只写非显而易见的意图和约束，不写"这个函数做了什么"的废话
+- 命名：变量名要能读出含义，不用缩写（除了 df / ts / dt 等领域惯例）
+- import 顺序：stdlib -> 第三方 -> 本项目，之间空行分隔
+
+## 错误处理
+
+- 外部 API 调用（tushare / akshare / Kimi）：必须用 tenacity 重试 + 明确的失败返回
+- 内部函数：让异常自然传播，不要 try-except 吞掉
+- 失败返回格式统一：`{"status": "error", "error_code": "...", "retry_hint": bool}`
+
+## 测试
+
+- 每个模块至少有 1 个 happy path + 1 个 error path 测试
+- 测试文件放 `tests/` 下，镜像 `src/` 目录结构
+- mock 外部 API（tushare / akshare / LLM），不在测试中发真实请求
+- 测试命名：`test_<模块>_<场景>_<预期结果>`
+
+## 项目特有约定
+
+- 数据接口：业务代码调 `execute("data", "<api_name>", input)`，不直接 import tushare/akshare SDK
+- LLM 调用：走 `src/llm_clients/tier_router.py`，不直接构造 OpenAI client
+- 凭证：通过 `src/vault/proxy.py` 获取，不直接读 `.env` 或 os.environ

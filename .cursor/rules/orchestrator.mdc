@@ -1,0 +1,57 @@
+---
+description: A股投资Agent系统 - 多智能体协同开发规范（组织智能体常驻指令）
+alwaysApply: true
+---
+
+# 项目：A 股投资 Agent 系统
+
+## 项目概要
+
+基于 LangGraph 编排的 9 agent 半自动投资信号系统。LLM 用 Kimi K2.6，数据用 tushare Pro + akshare，目标"年最大回撤 <=20% + 年化跑赢沪深 300 + 5%"。
+
+技术栈：Python 3.11+ / LangGraph / Qlib / DuckDB / LanceDB / Kimi K2.6 API / Langfuse
+
+架构三件套：Brain（无状态 agent）/ Hands（独立 sandbox 进程）/ Session（durable event log）
+
+## 多智能体协同开发规范
+
+本项目使用"组织智能体 - 执行智能体 - 审查智能体"模式开发。
+
+### 角色分工
+
+- **主会话（组织智能体）**：只做任务拆分、派发、审查结果汇总。不写业务代码，保持上下文轻量。
+- **Task generalPurpose（执行智能体）**：每个开发子任务一个独立子 agent，独立上下文，完成后返回报告。
+- **Task code-reviewer（审查智能体）**：独立代码审查，不信任执行者自评。
+- **Task explore（调研智能体）**：只读探索代码库，不修改文件。
+
+### 派发执行智能体的 prompt 必须包含
+
+1. **任务描述**：要做什么（完整文本，不让子 agent 自己读计划文件）
+2. **文件结构**：要创建/修改哪些文件，每个文件的职责
+3. **约束**：不能做什么（不改无关文件、不安装未批准的依赖、凭证不入代码）
+4. **经验文件**：开始前读 `docs/learnings.md`，完成后追加新经验
+5. **报告格式**：Status（DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT）+ 改了哪些文件 + 测试结果 + 问题
+
+### 审查流程（每个子任务完成后必须执行）
+
+1. **规格审查**：派 generalPurpose 子 agent，对比原始需求和实际代码，验证"做了该做的，没做不该做的"
+2. **代码质量审查**：派 code-reviewer 子 agent，检查代码质量、测试覆盖、风格一致性
+3. **修复循环**：审查发现问题 -> resume 原执行智能体修复 -> 再次审查 -> 最多 3 轮
+
+### 任务管理
+
+- 用 TodoWrite 跟踪所有子任务状态
+- 独立子任务并行派发，有依赖的串行
+- 每个 Phase 完成后，派 code-reviewer 做整体审查
+
+### 经验沉淀
+
+- 路径：`docs/learnings.md`
+- 执行智能体遇到坑时必须追加记录（日期 + 问题 + 解决方案）
+- 后续执行智能体启动时必须先读此文件
+
+### 凭证安全
+
+- tushare token / Kimi API key / 任何密钥 **只能**放 `.env`
+- 代码中通过 vault 代理层访问，agent 永远不可见明文
+- `.env` 已在 `.gitignore` 中

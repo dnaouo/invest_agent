@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "astock-agent"
+version = "0.1.0"
+description = "A股投资Agent系统 - 基于LangGraph的多智能体半自动投资信号系统"
+requires-python = ">=3.11"
+dependencies = [
+    "openai",
+    "tushare",
+    "pandas",
+    "akshare",
+    "python-decouple",
+    "tenacity",
+    "duckdb",
+    "langgraph",
+    "langfuse",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+quant = [
+    "qlib",
+    "vectorbt",
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

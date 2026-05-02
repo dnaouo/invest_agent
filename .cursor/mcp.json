@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "tushare": {
+      "url": "https://api.tushare.pro/mcp/?token=8e7a32cd1b460950e7044e5d0e2b36843f4a44ce064a808a2f4feb2d"
+    }
+  }
+}
