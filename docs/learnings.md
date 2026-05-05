@@ -133,3 +133,65 @@ PowerShell 输出中文会乱码（GBK vs UTF-8），但不影响实际功能。
 **问题**：`time.time()` 精度有限，极快连续调用 `emit_event` 时多条记录的 `ts` 值相同，导致 `ORDER BY ts DESC LIMIT 1` 返回不确定的行。`wake` 函数的 `last_event_type` / `last_agent` 因此不可靠。
 
 **解决**：在 ORDER BY 中加 `rowid DESC` 作为 tiebreaker：`ORDER BY ts DESC, rowid DESC LIMIT 1`。DuckDB 的 `rowid` 按插入顺序递增，保证相同 `ts` 时仍能取到最后插入的行。
+
+### 2026-05-02 Fundamental Agent mock 模式：patch 模块而非函数引用
+
+**经验**：`fund.py` 中用 `tushare_client.get_income(...)` 而非 `from sandboxes.data.tushare_client import get_income` 直接导入函数。这样测试中 `@patch("agents.fund.tushare_client")` 可以一次 mock 整个模块，所有 `getattr(mock_ts, "get_xxx")` 自动生效。如果改为导入具体函数，则需要逐个 `@patch("agents.fund.get_income")`，更繁琐且容易遗漏。这与 learnings 中 "router 路由表不能用模块级静态函数引用" 的经验一脉相承。
+
+### 2026-05-02 Critic Agent JSON 解析需强制覆盖 verdict
+
+**问题**：LLM 返回的 JSON 中 `verdict` 字段可能与 `score` 不一致（例如 score=35 但 LLM 写了 verdict="pass"）。
+
+**解决**：解析 JSON 后，根据 `score >= 60` 强制重算 `verdict`，不信任 LLM 自行判断的 verdict 值。这是 GAN 模式下的防御性编程——Critic 的通过/拒绝阈值必须由代码控制，不能让 LLM 自由发挥。
+
+### 2026-05-02 LangGraph StateGraph + TypedDict 兼容性良好
+
+**经验**：LangGraph 的 `StateGraph` 可以直接接受 `TypedDict(total=False)` 作为 state schema，无需额外适配。`graph.compile()` 返回可执行图，`graph.invoke(initial_state)` 传入初始状态后返回完整的最终状态（含所有节点写入的 key）。Phase 1a 最简编排 `fund -> critic -> END` 只需 5 行核心代码。测试时 mock 各节点的外部依赖（tushare_client、call_kimi）即可，不需要 mock LangGraph 本身。
+
+### 2026-05-02 Batch Agent 创建严格复制 fund.py 模式
+
+**经验**：创建 Macro/Tech/Event 三个 agent 时，严格复制 `fund.py` 的代码结构（_PROMPT_PATH + _load_prompt + _fetch_data + xxx_node）效率最高。区别仅在于：(1) Macro agent 不需要 ts_code 参数，只需 trade_date；(2) 多数据源 agent（如 Macro）同时 import tushare_client 和 akshare_client；(3) 测试中对多模块 mock 用 `@patch` 叠加装饰器，注意参数顺序与装饰器顺序相反。
+
+### 2026-05-02 Batch 2 Agent（Flow/Risk/Backtest）同样复制 fund.py 模式
+
+**经验**：第二批 4 个 agent（flow_institutional、flow_hot_money、risk、backtest）严格复制相同模式，零障碍一次通过。关键区别：(1) flow_institutional 的 `_fetch_data` 中 `get_moneyflow_hsgt` 不需要 ts_code，只传 start_date/end_date；(2) risk agent 调三个接口（pledge_stat + stk_holdertrade + share_float），fallback 中需包含 position_suggestion 默认值避免下游 KeyError；(3) backtest agent 用 trade_date 减 600 天覆盖约 120 个交易日，比精确计算交易日历更简洁。
+
+### 2026-05-03 Sprint Contract 复用 handoff.py 的文件 I/O 模式
+
+**经验**：`sprint_contract.py` 的 `generate_contract` / `load_contract` 完全复用 `handoff.py` 的 `save_handoff` / `load_handoff` 模式——Pydantic model + `model_dump_json` 写入 + `json.loads` 读回 + `contract_dir` 可注入参数（测试用 `tmp_path`）。LLM 返回 JSON 解析用 `content.index("{")` / `content.rindex("}")` 提取 JSON 子串，失败时降级到默认值。这个"提取 JSON + 降级 fallback"的模式可复用到后续所有需要 LLM 输出结构化数据的场景。
+
+### 2026-05-03 slice_data 缺失字段默认行为需显式排除
+
+**问题**：`slice_data` 用 `r.get(date_field, "")` 时，缺少 date_field 的记录会得到空字符串 `""`，而 `"" <= "20250510"` 为 True，导致缺失日期的记录被保留——这是 look-ahead 漏洞。
+
+**解决**：改用 `r.get(date_field) is not None` 前置检查，None 时直接排除。`slice_financial` 同理。凡是做时间截断的过滤器，都必须把缺失字段视为"不可信数据"丢弃而非保留。
+
+### 2026-05-03 safe_run_node 降级模式无需 mock LangGraph
+
+**经验**：`fallback.py` 的 `safe_run_node` 是纯函数包装器（接收 node_func + state + fallback_key），与 LangGraph 编排解耦。测试时直接传入普通函数即可，无需 mock StateGraph 或 compile。pass^k 测试中 mock `tools.pass_k.run_analysis`（即 mock 导入处）而非 `harness.orchestrator.run_analysis`（定义处），符合 "patch where it's looked up" 原则。
+
+### 2026-05-03 Dashboard 聚合查询复用 session events 的 :memory: 连接
+
+**经验**：`dashboard.py` 的 `generate_daily_report` 直接通过 `_get_conn(db_path)` 访问 DuckDB，与 `session/events.py` 共享连接池。测试中先用 `emit_event(..., db_path=":memory:")` 写入数据，再用 `generate_daily_report(..., db_path=":memory:")` 读取，两者通过 `_connections` 字典拿到同一个内存连接，无需额外 setup。清理 fixture 同时清 `_connections` 和 `_INITIALIZED`。
+
+### 2026-05-03 浮点精度断言用 pytest.approx
+
+**问题**：`(0.8 + 0.6 + 0.7 + 0.5) / 4` 在 Python 中不严格等于 `0.65`（浮点精度），导致 `assert result == expected` 失败。
+
+**解决**：用 `pytest.approx(0.65, abs=1e-9)` 做近似比较。所有涉及浮点运算的断言都应使用 `pytest.approx`。
+
+### 2026-05-05 SQLite :memory: 每次 connect 产生独立数据库
+
+**问题**：与 DuckDB 不同，`sqlite3.connect(":memory:")` 每次调用都会创建一个全新的独立内存数据库。如果多个函数各自调 `_get_conn(":memory:")`，它们拿到的是不同数据库，跨函数写入/读取无法共享数据，导致测试中 `get_portfolio` 读不到 `update_portfolio` 写入的数据。
+
+**解决**：测试中改用 `tmp_path / "test.sqlite"` 临时文件作为 `db_path`，pytest 的 `tmp_path` fixture 自动清理。这比实现连接缓存更简单，且与生产环境（文件型 SQLite）行为一致。
+
+### 2026-05-05 pnl_report.py 模块级 import 需要在测试中提前 mock
+
+**问题**：`pnl_report.py` 有 `from sandboxes.data import tushare_client`，虽然函数体内未使用，但模块加载时会触发 tushare_client 的初始化链。测试中若不 mock，会因缺少 `.env` 中的 tushare token 而失败。
+
+**解决**：在 `test_pnl_report.py` 中用 `with patch("tools.pnl_report.tushare_client"):` 包裹 import 语句，在模块加载前拦截。这种 "patch-before-import" 模式适用于所有带副作用模块级 import 的测试场景。
+
+### 2026-05-05 daily_runner 中 mock 外部调用的正确位置
+
+**经验**：`daily_runner.py` 导入了 `run_analysis`、`emit_event`、`write_note` 等多个外部函数。测试中 patch 的目标是 `harness.daily_runner.run_analysis`（导入处）而非 `harness.orchestrator.run_analysis`（定义处）。所有 7 个外部依赖全部 patch 后测试秒过，无需真实数据库或 API。
