@@ -16,6 +16,11 @@ def test_fetch_data(mock_ts):
     mock_ts.get_fina_indicator.return_value = {"status": "ok", "data": []}
     mock_ts.get_forecast.return_value = {"status": "ok", "data": []}
     mock_ts.get_daily_basic.return_value = {"status": "ok", "data": []}
+    mock_ts.get_fina_mainbz.return_value = {"status": "ok", "data": [{"test": 1}]}
+    mock_ts.get_stk_holdernumber.return_value = {"status": "ok", "data": [{"test": 1}]}
+    mock_ts.get_research_report.return_value = {"status": "ok", "data": [{"test": 1}]}
+    mock_ts.get_stk_surv.return_value = {"status": "ok", "data": [{"test": 1}]}
+    mock_ts.get_moneyflow.return_value = {"status": "ok", "data": [{"test": 1}]}
 
     data = _fetch_data("000988.SZ", "20260430")
     assert "income" in data
@@ -29,6 +34,8 @@ def test_fund_node_success(mock_ts, mock_kimi):
     for attr in [
         "get_income", "get_balancesheet", "get_cashflow",
         "get_fina_indicator", "get_forecast", "get_daily_basic",
+        "get_fina_mainbz", "get_stk_holdernumber", "get_research_report",
+        "get_stk_surv", "get_moneyflow",
     ]:
         getattr(mock_ts, attr).return_value = {"status": "ok", "data": [{"test": 1}]}
 
@@ -59,6 +66,8 @@ def test_fund_node_llm_parse_failure(mock_ts, mock_kimi):
     for attr in [
         "get_income", "get_balancesheet", "get_cashflow",
         "get_fina_indicator", "get_forecast", "get_daily_basic",
+        "get_fina_mainbz", "get_stk_holdernumber", "get_research_report",
+        "get_stk_surv", "get_moneyflow",
     ]:
         getattr(mock_ts, attr).return_value = {"status": "ok", "data": []}
 

@@ -7,6 +7,9 @@
 - 同花顺板块指数列表（ths_index）：板块代码、名称、涨跌幅
 - 财联社快讯（cls_news）：最近的市场要闻、政策动态
 - 金十/新浪全球快讯（jin10_news）：宏观经济数据、国际市场动向
+- 行业资金流向（industry_moneyflow）：同花顺行业板块资金净流入/流出
+- 概念资金流向（concept_moneyflow）：同花顺概念板块资金净流入/流出
+- 政策法规（policies）：近期国家级政策法规文件
 </inputs>
 
 <outputs>

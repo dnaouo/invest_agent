@@ -30,6 +30,19 @@ def test_macro_node(mock_ts, mock_ak, mock_kimi):
         "data": [{"content": "美联储维持利率"}],
     }
 
+    mock_ts.get_moneyflow_ind_ths.return_value = {
+        "status": "ok",
+        "data": [{"test": 1}],
+    }
+    mock_ts.get_moneyflow_cnt_ths.return_value = {
+        "status": "ok",
+        "data": [{"test": 1}],
+    }
+    mock_ts.get_npr.return_value = {
+        "status": "ok",
+        "data": [{"test": 1}],
+    }
+
     mock_kimi.return_value = {
         "content": json.dumps({
             "score": 82,
@@ -115,6 +128,10 @@ def test_event_node(mock_ts, mock_kimi):
     mock_ts.get_forecast.return_value = {
         "status": "ok",
         "data": [{"type": "预增", "p_change_min": 50, "p_change_max": 80}],
+    }
+    mock_ts.get_research_report.return_value = {
+        "status": "ok",
+        "data": [{"test": 1}],
     }
 
     mock_kimi.return_value = {

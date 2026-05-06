@@ -45,6 +45,43 @@ def _fetch_data(ts_code: str, trade_date: str) -> dict:
     if daily_basic["status"] == "ok":
         data["daily_basic"] = daily_basic["data"][:5]
 
+    try:
+        mainbz = tushare_client.get_fina_mainbz(ts_code=ts_code, period=period)
+        if mainbz["status"] == "ok":
+            data["fina_mainbz"] = mainbz["data"]
+    except Exception:
+        pass
+
+    try:
+        holdernumber = tushare_client.get_stk_holdernumber(ts_code=ts_code, end_date=trade_date)
+        if holdernumber["status"] == "ok":
+            data["stk_holdernumber"] = holdernumber["data"][:8]
+    except Exception:
+        pass
+
+    try:
+        research = tushare_client.get_research_report(trade_date)
+        if research["status"] == "ok":
+            relevant = [r for r in research["data"] if ts_code[:6] in str(r.get("title", "")) or ts_code[:6] in str(r.get("abstr", ""))]
+            if relevant:
+                data["research_reports"] = relevant[:5]
+    except Exception:
+        pass
+
+    try:
+        stk_surv = tushare_client.get_stk_surv(ts_code=ts_code)
+        if stk_surv["status"] == "ok":
+            data["stk_surv"] = stk_surv["data"][:10]
+    except Exception:
+        pass
+
+    try:
+        moneyflow = tushare_client.get_moneyflow(ts_code=ts_code, trade_date=trade_date)
+        if moneyflow["status"] == "ok":
+            data["moneyflow"] = moneyflow["data"][:5]
+    except Exception:
+        pass
+
     return data
 
 

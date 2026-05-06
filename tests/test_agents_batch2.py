@@ -13,12 +13,33 @@ from agents.backtest import backtest_node, _fetch_data as bt_fetch
 # ---------- Flow Institutional ----------
 
 @patch("agents.flow_institutional.call_kimi")
+@patch("agents.flow_institutional.akshare_client")
 @patch("agents.flow_institutional.tushare_client")
-def test_flow_inst_node(mock_ts, mock_kimi):
+def test_flow_inst_node(mock_ts, mock_ak, mock_kimi):
     """验证 flow_inst_node 正常流程。"""
     mock_ts.get_moneyflow_hsgt.return_value = {
         "status": "ok",
         "data": [{"trade_date": "20260430", "north_money": 12.3}],
+    }
+    mock_ak.get_north_flow_individual.return_value = {
+        "status": "ok",
+        "data": [{"test": 1}],
+    }
+    mock_ts.get_moneyflow.return_value = {
+        "status": "ok",
+        "data": [{"test": 1}],
+    }
+    mock_ts.get_margin_detail.return_value = {
+        "status": "ok",
+        "data": [{"test": 1}],
+    }
+    mock_ts.get_hsgt_top10.return_value = {
+        "status": "ok",
+        "data": [{"test": 1}],
+    }
+    mock_ts.get_top10_holders.return_value = {
+        "status": "ok",
+        "data": [{"test": 1}],
     }
 
     mock_kimi.return_value = {
@@ -55,6 +76,18 @@ def test_flow_hot_node(mock_ts, mock_kimi):
     mock_ts.get_block_trade.return_value = {
         "status": "ok",
         "data": [{"price": 25.3, "premium": -2.1}],
+    }
+    mock_ts.get_top_inst.return_value = {
+        "status": "ok",
+        "data": [{"test": 1}],
+    }
+    mock_ts.get_stk_surv.return_value = {
+        "status": "ok",
+        "data": [{"test": 1}],
+    }
+    mock_ts.get_hm_list.return_value = {
+        "status": "ok",
+        "data": [{"test": 1}],
     }
 
     mock_kimi.return_value = {

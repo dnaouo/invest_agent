@@ -29,6 +29,27 @@ def _fetch_data(ts_code: str, trade_date: str) -> dict:
     if block_trade["status"] == "ok":
         data["block_trade"] = block_trade["data"][:10]
 
+    try:
+        top_inst = tushare_client.get_top_inst(trade_date=trade_date)
+        if top_inst["status"] == "ok":
+            data["top_inst"] = top_inst["data"][:20]
+    except Exception:
+        pass
+
+    try:
+        stk_surv = tushare_client.get_stk_surv(ts_code=ts_code)
+        if stk_surv["status"] == "ok":
+            data["stk_surv"] = stk_surv["data"][:10]
+    except Exception:
+        pass
+
+    try:
+        hm_list = tushare_client.get_hm_list()
+        if hm_list["status"] == "ok":
+            data["hm_list"] = hm_list["data"][:50]
+    except Exception:
+        pass
+
     return data
 
 

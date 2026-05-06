@@ -39,6 +39,15 @@ def _fetch_data(ts_code: str, trade_date: str) -> dict:
     if forecast["status"] == "ok":
         data["forecast"] = forecast["data"][:5]
 
+    try:
+        research = tushare_client.get_research_report(trade_date)
+        if research["status"] == "ok":
+            relevant = [r for r in research["data"] if ts_code[:6] in str(r.get("title", "")) or ts_code[:6] in str(r.get("abstr", ""))]
+            if relevant:
+                data["research_reports"] = relevant[:5]
+    except Exception:
+        pass
+
     return data
 
 

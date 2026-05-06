@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from agents.state import MarketState
-from sandboxes.data import tushare_client
+from sandboxes.data import tushare_client, akshare_client
 from llm_clients.kimi_sync import call_kimi
 from llm_clients.tier_router import get_tier_config
 
@@ -28,6 +28,44 @@ def _fetch_data(ts_code: str, trade_date: str) -> dict:
     )
     if hsgt["status"] == "ok":
         data["moneyflow_hsgt"] = hsgt["data"][:10]
+
+    try:
+        symbol = ts_code.replace(".SZ", "").replace(".SH", "")
+        north_individual = akshare_client.get_north_flow_individual(symbol=symbol)
+        if north_individual["status"] == "ok":
+            data["north_individual"] = north_individual["data"][:10]
+    except Exception:
+        pass
+
+    try:
+        moneyflow = tushare_client.get_moneyflow(ts_code=ts_code, trade_date=trade_date)
+        if moneyflow["status"] == "ok":
+            data["moneyflow"] = moneyflow["data"][:5]
+    except Exception:
+        pass
+
+    try:
+        margin_start = str(int(trade_date) - 100)
+        margin = tushare_client.get_margin_detail(ts_code=ts_code, start_date=margin_start, end_date=trade_date)
+        if margin["status"] == "ok":
+            data["margin_detail"] = margin["data"][:10]
+    except Exception:
+        pass
+
+    try:
+        hsgt_top = tushare_client.get_hsgt_top10(trade_date=trade_date)
+        if hsgt_top["status"] == "ok":
+            data["hsgt_top10"] = [r for r in hsgt_top["data"] if r.get("ts_code") == ts_code]
+    except Exception:
+        pass
+
+    try:
+        year = trade_date[:4]
+        holders = tushare_client.get_top10_holders(ts_code=ts_code, period=f"{int(year)-1}1231")
+        if holders["status"] == "ok":
+            data["top10_holders"] = holders["data"][:10]
+    except Exception:
+        pass
 
     return data
 

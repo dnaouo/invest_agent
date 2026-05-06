@@ -195,3 +195,7 @@ PowerShell 输出中文会乱码（GBK vs UTF-8），但不影响实际功能。
 ### 2026-05-05 daily_runner 中 mock 外部调用的正确位置
 
 **经验**：`daily_runner.py` 导入了 `run_analysis`、`emit_event`、`write_note` 等多个外部函数。测试中 patch 的目标是 `harness.daily_runner.run_analysis`（导入处）而非 `harness.orchestrator.run_analysis`（定义处）。所有 7 个外部依赖全部 patch 后测试秒过，无需真实数据库或 API。
+
+### 2026-05-06 V2-A 批量扩展 tushare_client 第三批 13 个接口
+
+**经验**：第三批扩展（moneyflow_ind_ths/cnt_ths、fina_mainbz、stk_holdernumber、forecast_vip、express_vip、limit_list_d、margin/margin_detail、hsgt_top10、top10_holders、moneyflow、index_daily）继续严格复制已有模式，一次通过。可选参数函数用 kwargs 构造 + 只传非空值的模式已成标准做法。测试中为可选参数函数额外写一个 `_no_optional_success` 用例，验证不传可选参数时 kwargs 中不含该 key。

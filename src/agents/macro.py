@@ -33,6 +33,28 @@ def _fetch_data(trade_date: str) -> dict:
     if jin10["status"] == "ok":
         data["jin10_news"] = jin10["data"][:20]
 
+    try:
+        ind_flow = tushare_client.get_moneyflow_ind_ths(trade_date=trade_date)
+        if ind_flow["status"] == "ok":
+            data["industry_moneyflow"] = ind_flow["data"][:20]
+    except Exception:
+        pass
+
+    try:
+        cnt_flow = tushare_client.get_moneyflow_cnt_ths(trade_date=trade_date)
+        if cnt_flow["status"] == "ok":
+            data["concept_moneyflow"] = cnt_flow["data"][:20]
+    except Exception:
+        pass
+
+    try:
+        start_date = str(int(trade_date) - 30)
+        npr_result = tushare_client.get_npr(start_date=start_date, end_date=trade_date)
+        if npr_result["status"] == "ok":
+            data["policies"] = npr_result["data"][:10]
+    except Exception:
+        pass
+
     return data
 
 
