@@ -34,6 +34,63 @@ def parse_stock(s: str) -> tuple[str, str]:
     return code.strip(), name.strip()
 
 
+AGENT_KEYS = [
+    ("macro_themes", "宏观主题"),
+    ("fundamental_score", "基本面"),
+    ("technical_score", "技术面"),
+    ("event_analysis", "事件驱动"),
+    ("flow_institutional", "机构资金"),
+    ("flow_hot_money", "游资跟踪"),
+    ("risk_assessment", "风险评估"),
+    ("backtest_result", "回测验证"),
+    ("critic_review", "Critic审查"),
+    ("supervisor_signal", "Supervisor信号"),
+]
+
+
+def _print_detail(result: dict, elapsed: float):
+    """打印单只股票全部 10 个 agent 的详细结果。"""
+    print(f"\n  {'─'*56}")
+    for key, label in AGENT_KEYS:
+        agent_out = result.get(key, {})
+        if not agent_out:
+            print(f"  {label:<12} (无数据)")
+            continue
+        score = agent_out.get("score", "-")
+        summary = agent_out.get("summary", "")
+        if not summary:
+            for fallback in ("direction", "verdict", "worst_case"):
+                if fallback in agent_out:
+                    summary = f"{fallback}={agent_out[fallback]}"
+                    break
+        summary_short = summary
+        highlights = agent_out.get("highlights", agent_out.get("reasons", []))
+        risks = agent_out.get("risks", agent_out.get("objections", []))
+        print(f"  {label:<12} 评分:{score:<6} {summary_short}")
+        if highlights:
+            for h in highlights[:3]:
+                print(f"    + {h}")
+        if risks:
+            for r in risks[:3]:
+                print(f"    - {r}")
+    print(f"  {'─'*56}")
+    print(f"  耗时: {elapsed:.1f}s")
+
+
+def _save_incremental(path: Path, trade_date: str, stock_list, summary_rows, all_results, elapsed):
+    """每只股票完成后增量保存 JSON。"""
+    output = {
+        "trade_date": trade_date,
+        "total_stocks": len(stock_list),
+        "completed": len(summary_rows),
+        "total_elapsed": round(elapsed, 1),
+        "summary": summary_rows,
+        "details": {k: v for k, v in all_results.items()},
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(output, f, ensure_ascii=False, indent=2, default=str)
+
+
 def main():
     parser = argparse.ArgumentParser(description="批量分析多只股票")
     parser.add_argument("stocks", nargs="*", help="股票列表，格式: 代码:名称")
@@ -75,8 +132,14 @@ def main():
     all_results = {}
     summary_rows = []
     total_t0 = time.time()
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     for i, (ts_code, stock_name) in enumerate(stock_list, 1):
+        if i > 1:
+            print(f"  [冷却 10s 避免限流...]")
+            sys.stdout.flush()
+            time.sleep(10)
         print(f"\n{'='*60}")
         print(f"[{i}/{len(stock_list)}] {stock_name}（{ts_code}）")
         print(f"{'='*60}")
@@ -110,10 +173,7 @@ def main():
             summary_rows.append(row)
             all_results[ts_code] = result
 
-            print(f"\n  基本面: {row['fund_score']}  技术面: {row['tech_score']}  事件: {row['event_score']}")
-            print(f"  Critic: {row['critic_score']} ({row['critic_verdict']})")
-            print(f"  信号: {row['direction']}  置信度: {row['confidence']}  仓位: {row['position_pct']}%")
-            print(f"  耗时: {elapsed:.1f}s")
+            _print_detail(result, elapsed)
 
         except Exception as e:
             elapsed = time.time() - t0
@@ -127,6 +187,8 @@ def main():
                 "elapsed": round(elapsed, 1),
             })
 
+        # 增量保存——每只股票完成后立即写入
+        _save_incremental(output_path, args.date, stock_list, summary_rows, all_results, time.time() - total_t0)
         sys.stdout.flush()
 
     total_elapsed = time.time() - total_t0
@@ -144,18 +206,8 @@ def main():
         else:
             print(f"{r['stock_name']:<10} {'ERROR':>5} {'':<38} {r['elapsed']:>5.0f}s")
 
-    # 保存结果
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output = {
-        "trade_date": args.date,
-        "total_stocks": len(stock_list),
-        "total_elapsed": round(total_elapsed, 1),
-        "summary": summary_rows,
-        "details": {k: v for k, v in all_results.items()},
-    }
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(output, f, ensure_ascii=False, indent=2, default=str)
+    # 最终保存
+    _save_incremental(output_path, args.date, stock_list, summary_rows, all_results, total_elapsed)
     print(f"\n结果已保存: {output_path}")
     sys.stdout.flush()
 

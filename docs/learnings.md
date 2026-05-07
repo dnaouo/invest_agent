@@ -199,3 +199,25 @@ PowerShell 输出中文会乱码（GBK vs UTF-8），但不影响实际功能。
 ### 2026-05-06 V2-A 批量扩展 tushare_client 第三批 13 个接口
 
 **经验**：第三批扩展（moneyflow_ind_ths/cnt_ths、fina_mainbz、stk_holdernumber、forecast_vip、express_vip、limit_list_d、margin/margin_detail、hsgt_top10、top10_holders、moneyflow、index_daily）继续严格复制已有模式，一次通过。可选参数函数用 kwargs 构造 + 只传非空值的模式已成标准做法。测试中为可选参数函数额外写一个 `_no_optional_success` 用例，验证不传可选参数时 kwargs 中不含该 key。
+
+### 2026-05-06 V2-A Task 1-5 增强 5 个 Agent 数据接入
+
+**经验**：批量增强 agent 的 `_fetch_data` 时，所有新增数据调用必须用 `try/except` 包裹（即使 tushare_client 本身已有错误处理），因为 agent 层面任一数据源失败不应影响其他数据源。`_fetch_data` 需要 state 参数时（如过滤研报需要 stock_name），添加 `state: dict | None = None` 可选参数，保持向后兼容。flow_institutional 新增 akshare_client import 后，测试需要在 `@patch` 装饰器中额外 mock akshare_client，且注意装饰器参数顺序（与函数参数顺序相反）。所有新增 mock 返回 `{"status": "ok", "data": [{"test": 1}]}` 即可满足测试。
+
+### 2026-05-07 str(int(trade_date) - N) 日期计算是跨月 bug
+
+**问题**：8 个 agent 文件中用 `str(int(trade_date) - 100)` 做日期回溯，当 trade_date 为 `"20260101"` 时得到 `"20260001"`（不存在的日期），跨月/跨年场景全部出错。
+
+**解决**：统一用 `datetime.strptime + timedelta` 做日期运算。在各 `_fetch_data` 内定义本地 `_subtract_days` 辅助函数，避免修改模块级 API。涉及文件：event.py / fund.py / flow_institutional.py / macro.py / tech.py / backtest.py / risk.py（共 8 处替换）。
+
+### 2026-05-07 DuckDB :memory: 在同一 pytest session 中跨测试类共享
+
+**经验**：`duckdb_store._connections` 缓存 `:memory:` 连接。多个测试类（如 TestSearchReports 和 TestMatchHotMoney）在同一 session 中通过 `_setup_table` 写入 `:memory:`，它们实际共享同一个内存数据库。这反而有利于 agent_tools 测试：可以在不同类中累积表数据。但 `autouse` fixture 在 yield 后 `.clear()` 确保下次运行时干净。
+
+### 2026-05-07 tool_executor 测试中 tool_calls 用 dict 而非 OpenAI 对象
+
+**经验**：`tool_executor.py` 通过 `hasattr(tc, "function")` 同时兼容 OpenAI SDK 返回的对象和 dict 两种形式。测试中直接用 dict 构造 mock tool_calls（`{"id": "tc_1", "function": {"name": "...", "arguments": "..."}}`），比构造 MagicMock 模拟 OpenAI 对象更简洁。`run_agent_with_tools` 会走 `tc.get("function", {}).get("name", "")` 的 dict 分支。
+
+### 2026-05-08 Agent 改造从 call_kimi 到 run_agent_with_tools 的标准模式
+
+**经验**：5 个 agent（fund/event/macro/flow_institutional/flow_hot_money）从直接调 `call_kimi` 改为通过 `run_agent_with_tools` 间接调用，改造步骤完全一致：(1) 替换 import：去掉 `from llm_clients.kimi_sync import call_kimi`，加 `from tools.agent_tools import TOOL_XXX, func_xxx` + `from tools.tool_executor import run_agent_with_tools`；(2) `_fetch_data` 完全不动；(3) `xxx_node` 中把 `call_kimi(messages=[...], **tier)` 替换为 `run_agent_with_tools(system_prompt=, user_message=, tools=, tool_functions=, tier_config=, max_rounds=3)`，返回值从 `response["content"]` 取即可。测试中 mock 目标从 `agents.xxx.call_kimi` 改为 `agents.xxx.run_agent_with_tools`，返回值格式从 `{"content":..., "tool_calls":None, "usage":MagicMock()}` 改为 `{"content":..., "reasoning_content":None, "tool_calls_made":[]}`。test_orchestrator.py 中需额外注意 @patch 装饰器顺序与函数参数顺序相反。

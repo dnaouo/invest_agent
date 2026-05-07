@@ -12,10 +12,10 @@ from agents.backtest import backtest_node, _fetch_data as bt_fetch
 
 # ---------- Flow Institutional ----------
 
-@patch("agents.flow_institutional.call_kimi")
+@patch("agents.flow_institutional.run_agent_with_tools")
 @patch("agents.flow_institutional.akshare_client")
 @patch("agents.flow_institutional.tushare_client")
-def test_flow_inst_node(mock_ts, mock_ak, mock_kimi):
+def test_flow_inst_node(mock_ts, mock_ak, mock_run):
     """验证 flow_inst_node 正常流程。"""
     mock_ts.get_moneyflow_hsgt.return_value = {
         "status": "ok",
@@ -42,7 +42,7 @@ def test_flow_inst_node(mock_ts, mock_ak, mock_kimi):
         "data": [{"test": 1}],
     }
 
-    mock_kimi.return_value = {
+    mock_run.return_value = {
         "content": json.dumps({
             "score": 72,
             "north_flow_trend": "持续流入",
@@ -51,8 +51,7 @@ def test_flow_inst_node(mock_ts, mock_ak, mock_kimi):
             "summary": "北向资金持续流入",
         }),
         "reasoning_content": None,
-        "tool_calls": None,
-        "usage": MagicMock(),
+        "tool_calls_made": [],
     }
 
     state = {"ts_code": "000988.SZ", "trade_date": "20260430", "stock_name": "华工科技"}
@@ -65,9 +64,9 @@ def test_flow_inst_node(mock_ts, mock_ak, mock_kimi):
 
 # ---------- Flow Hot Money ----------
 
-@patch("agents.flow_hot_money.call_kimi")
+@patch("agents.flow_hot_money.run_agent_with_tools")
 @patch("agents.flow_hot_money.tushare_client")
-def test_flow_hot_node(mock_ts, mock_kimi):
+def test_flow_hot_node(mock_ts, mock_run):
     """验证 flow_hot_node 正常流程。"""
     mock_ts.get_top_list.return_value = {
         "status": "ok",
@@ -90,7 +89,7 @@ def test_flow_hot_node(mock_ts, mock_kimi):
         "data": [{"test": 1}],
     }
 
-    mock_kimi.return_value = {
+    mock_run.return_value = {
         "content": json.dumps({
             "score": 65,
             "hot_money_trades": [
@@ -100,8 +99,7 @@ def test_flow_hot_node(mock_ts, mock_kimi):
             "summary": "游资关注，信号中性偏多",
         }),
         "reasoning_content": None,
-        "tool_calls": None,
-        "usage": MagicMock(),
+        "tool_calls_made": [],
     }
 
     state = {"ts_code": "000988.SZ", "trade_date": "20260430", "stock_name": "华工科技"}

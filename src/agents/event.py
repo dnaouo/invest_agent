@@ -2,12 +2,17 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from agents.state import MarketState
 from sandboxes.data import tushare_client
-from llm_clients.kimi_sync import call_kimi
 from llm_clients.tier_router import get_tier_config
+from tools.agent_tools import (
+    TOOL_SEARCH_REPORTS, TOOL_SEARCH_NEWS, TOOL_CLASSIFY_EVENTS,
+    search_reports, search_news, classify_events,
+)
+from tools.tool_executor import run_agent_with_tools
 
 
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "event.md"
@@ -21,7 +26,11 @@ def _fetch_data(ts_code: str, trade_date: str) -> dict:
     """拉取事件驱动分析需要的全部数据。"""
     data = {}
 
-    start = str(int(trade_date) - 100)
+    def _subtract_days(date_str: str, days: int) -> str:
+        dt = datetime.strptime(date_str, "%Y%m%d")
+        return (dt - timedelta(days=days)).strftime("%Y%m%d")
+
+    start = _subtract_days(trade_date, 100)
 
     anns = tushare_client.get_anns_d(ts_code=ts_code, start_date=start, end_date=trade_date)
     if anns["status"] == "ok":
@@ -66,12 +75,20 @@ def event_node(state: MarketState) -> dict:
     )
 
     tier = get_tier_config("event")
-    response = call_kimi(
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ],
-        **tier,
+    tools = [TOOL_SEARCH_REPORTS, TOOL_SEARCH_NEWS, TOOL_CLASSIFY_EVENTS]
+    tool_funcs = {
+        "search_reports": search_reports,
+        "search_news": search_news,
+        "classify_events": classify_events,
+    }
+
+    response = run_agent_with_tools(
+        system_prompt=system_prompt,
+        user_message=user_message,
+        tools=tools,
+        tool_functions=tool_funcs,
+        tier_config=tier,
+        max_rounds=3,
     )
 
     content = response["content"]

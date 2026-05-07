@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from agents.state import MarketState
@@ -25,7 +26,11 @@ def _fetch_data(ts_code: str, trade_date: str) -> dict:
     if pledge["status"] == "ok":
         data["pledge_stat"] = pledge["data"][:5]
 
-    start = str(int(trade_date) - 100)
+    def _subtract_days(date_str: str, days: int) -> str:
+        dt = datetime.strptime(date_str, "%Y%m%d")
+        return (dt - timedelta(days=days)).strftime("%Y%m%d")
+
+    start = _subtract_days(trade_date, 100)
     holdertrade = tushare_client.get_stk_holdertrade(
         ts_code=ts_code, start_date=start, end_date=trade_date,
     )

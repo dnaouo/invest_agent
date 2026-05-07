@@ -6,8 +6,9 @@ from pathlib import Path
 
 from agents.state import MarketState
 from sandboxes.data import tushare_client
-from llm_clients.kimi_sync import call_kimi
 from llm_clients.tier_router import get_tier_config
+from tools.agent_tools import TOOL_MATCH_HOT_MONEY, match_hot_money
+from tools.tool_executor import run_agent_with_tools
 
 
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "flow_hot_money.md"
@@ -68,12 +69,16 @@ def flow_hot_node(state: MarketState) -> dict:
     )
 
     tier = get_tier_config("flow_hot")
-    response = call_kimi(
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ],
-        **tier,
+    tools = [TOOL_MATCH_HOT_MONEY]
+    tool_funcs = {"match_hot_money": match_hot_money}
+
+    response = run_agent_with_tools(
+        system_prompt=system_prompt,
+        user_message=user_message,
+        tools=tools,
+        tool_functions=tool_funcs,
+        tier_config=tier,
+        max_rounds=3,
     )
 
     content = response["content"]

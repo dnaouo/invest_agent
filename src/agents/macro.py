@@ -2,12 +2,17 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from agents.state import MarketState
 from sandboxes.data import tushare_client, akshare_client
-from llm_clients.kimi_sync import call_kimi
 from llm_clients.tier_router import get_tier_config
+from tools.agent_tools import (
+    TOOL_SEARCH_POLICY, TOOL_SEARCH_NEWS, TOOL_GET_THEME,
+    search_policy, search_news, get_theme_members,
+)
+from tools.tool_executor import run_agent_with_tools
 
 
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "macro.md"
@@ -48,7 +53,11 @@ def _fetch_data(trade_date: str) -> dict:
         pass
 
     try:
-        start_date = str(int(trade_date) - 30)
+        def _subtract_days(date_str: str, days: int) -> str:
+            dt = datetime.strptime(date_str, "%Y%m%d")
+            return (dt - timedelta(days=days)).strftime("%Y%m%d")
+
+        start_date = _subtract_days(trade_date, 30)
         npr_result = tushare_client.get_npr(start_date=start_date, end_date=trade_date)
         if npr_result["status"] == "ok":
             data["policies"] = npr_result["data"][:10]
@@ -71,12 +80,20 @@ def macro_node(state: MarketState) -> dict:
     )
 
     tier = get_tier_config("macro")
-    response = call_kimi(
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ],
-        **tier,
+    tools = [TOOL_SEARCH_POLICY, TOOL_SEARCH_NEWS, TOOL_GET_THEME]
+    tool_funcs = {
+        "search_policy": search_policy,
+        "search_news": search_news,
+        "get_theme_members": get_theme_members,
+    }
+
+    response = run_agent_with_tools(
+        system_prompt=system_prompt,
+        user_message=user_message,
+        tools=tools,
+        tool_functions=tool_funcs,
+        tier_config=tier,
+        max_rounds=3,
     )
 
     content = response["content"]

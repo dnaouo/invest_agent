@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from agents.state import MarketState
 from sandboxes.data import tushare_client, akshare_client
-from llm_clients.kimi_sync import call_kimi
 from llm_clients.tier_router import get_tier_config
+from tools.agent_tools import TOOL_GET_NORTH, get_north_individual
+from tools.tool_executor import run_agent_with_tools
 
 
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "flow_institutional.md"
@@ -21,7 +23,11 @@ def _fetch_data(ts_code: str, trade_date: str) -> dict:
     """拉取机构资金分析需要的全部数据。"""
     data = {}
 
-    start = str(int(trade_date) - 30)
+    def _subtract_days(date_str: str, days: int) -> str:
+        dt = datetime.strptime(date_str, "%Y%m%d")
+        return (dt - timedelta(days=days)).strftime("%Y%m%d")
+
+    start = _subtract_days(trade_date, 30)
 
     hsgt = tushare_client.get_moneyflow_hsgt(
         start_date=start, end_date=trade_date,
@@ -45,7 +51,7 @@ def _fetch_data(ts_code: str, trade_date: str) -> dict:
         pass
 
     try:
-        margin_start = str(int(trade_date) - 100)
+        margin_start = _subtract_days(trade_date, 100)
         margin = tushare_client.get_margin_detail(ts_code=ts_code, start_date=margin_start, end_date=trade_date)
         if margin["status"] == "ok":
             data["margin_detail"] = margin["data"][:10]
@@ -85,12 +91,16 @@ def flow_inst_node(state: MarketState) -> dict:
     )
 
     tier = get_tier_config("flow_inst")
-    response = call_kimi(
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ],
-        **tier,
+    tools = [TOOL_GET_NORTH]
+    tool_funcs = {"get_north_individual": get_north_individual}
+
+    response = run_agent_with_tools(
+        system_prompt=system_prompt,
+        user_message=user_message,
+        tools=tools,
+        tool_functions=tool_funcs,
+        tier_config=tier,
+        max_rounds=3,
     )
 
     content = response["content"]

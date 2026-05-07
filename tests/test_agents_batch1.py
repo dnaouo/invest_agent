@@ -12,10 +12,10 @@ from agents.event import event_node
 # ─── Macro Agent ────────────────────────────────────────────────────────────
 
 
-@patch("agents.macro.call_kimi")
+@patch("agents.macro.run_agent_with_tools")
 @patch("agents.macro.akshare_client")
 @patch("agents.macro.tushare_client")
-def test_macro_node(mock_ts, mock_ak, mock_kimi):
+def test_macro_node(mock_ts, mock_ak, mock_run):
     """验证 macro_node 返回正确的 state key 并解析 JSON。"""
     mock_ts.get_ths_index.return_value = {
         "status": "ok",
@@ -43,7 +43,7 @@ def test_macro_node(mock_ts, mock_ak, mock_kimi):
         "data": [{"test": 1}],
     }
 
-    mock_kimi.return_value = {
+    mock_run.return_value = {
         "content": json.dumps({
             "score": 82,
             "top_themes": [{"name": "CPO", "score": 88, "trend": "上升"}],
@@ -52,8 +52,7 @@ def test_macro_node(mock_ts, mock_ak, mock_kimi):
             "summary": "主线明确",
         }),
         "reasoning_content": None,
-        "tool_calls": None,
-        "usage": MagicMock(),
+        "tool_calls_made": [],
     }
 
     state = {"ts_code": "000988.SZ", "trade_date": "20260430", "stock_name": "华工科技"}
@@ -109,9 +108,9 @@ def test_tech_node(mock_ts, mock_kimi):
 # ─── Event Agent ────────────────────────────────────────────────────────────
 
 
-@patch("agents.event.call_kimi")
+@patch("agents.event.run_agent_with_tools")
 @patch("agents.event.tushare_client")
-def test_event_node(mock_ts, mock_kimi):
+def test_event_node(mock_ts, mock_run):
     """验证 event_node 返回正确的 state key 并解析 JSON。"""
     mock_ts.get_anns_d.return_value = {
         "status": "ok",
@@ -134,7 +133,7 @@ def test_event_node(mock_ts, mock_kimi):
         "data": [{"test": 1}],
     }
 
-    mock_kimi.return_value = {
+    mock_run.return_value = {
         "content": json.dumps({
             "score": 78,
             "events": [
@@ -144,8 +143,7 @@ def test_event_node(mock_ts, mock_kimi):
             "summary": "事件面偏正面",
         }),
         "reasoning_content": None,
-        "tool_calls": None,
-        "usage": MagicMock(),
+        "tool_calls_made": [],
     }
 
     state = {"ts_code": "000988.SZ", "trade_date": "20260430", "stock_name": "华工科技"}

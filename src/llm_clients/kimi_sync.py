@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from openai import APIConnectionError, OpenAI, RateLimitError
+from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from requests.exceptions import ConnectionError as ReqConnectionError
 
 from vault.proxy import get_credential
 
@@ -17,7 +18,11 @@ _client: OpenAI | None = None
 def _get_client() -> OpenAI:
     global _client
     if _client is None:
-        _client = OpenAI(api_key=get_credential("moonshot"), base_url=_BASE_URL)
+        _client = OpenAI(
+            api_key=get_credential("moonshot"),
+            base_url=_BASE_URL,
+            timeout=600.0,
+        )
     return _client
 
 
@@ -26,9 +31,12 @@ _THINKING_MIN_TOKENS = 16_000
 
 
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(min=1, max=10),
-    retry=retry_if_exception_type((APIConnectionError, RateLimitError)),
+    stop=stop_after_attempt(4),
+    wait=wait_exponential(min=2, max=30),
+    retry=retry_if_exception_type((
+        APIConnectionError, APITimeoutError, RateLimitError,
+        ReqConnectionError, ConnectionError,
+    )),
     reraise=True,
 )
 def call_kimi(
