@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -12,10 +13,18 @@ from sandboxes.data import tushare_client
 from tools.agent_tools import (
     ALL_TOOLS,
     TOOL_FUNCTIONS,
+    fetch_announcement_content,
+    get_mainbiz_detail,
+    get_report_rating,
+    get_industry_chain,
+    search_reports,
+    fetch_stock_news,
 )
 from tools.consensus import build_consensus
 from tools.news_search import extract_mainbz_keywords, search_news_for_stock
 from tools.tool_executor import run_agent_with_tools
+
+log = logging.getLogger(__name__)
 
 _PROMPT_DIR = Path(__file__).resolve().parent.parent / "agents" / "prompts"
 
@@ -173,6 +182,77 @@ def _fetch_phase1_data(ts_code: str, trade_date: str, stock_name: str = "") -> d
     return data
 
 
+def _fetch_phase2_data(
+    ts_code: str, trade_date: str, stock_name: str, phase1_data: dict,
+) -> dict:
+    """结构化信息收集——在 LLM 搜索前自动收集关键数据。"""
+    pack: dict[str, str] = {}
+
+    # 1. 逐个读取近期公告全文（最多 5 条，跳过定期报告）
+    for ann in phase1_data.get("recent_announcements", [])[:5]:
+        title = ann.get("title", "")
+        if not title or "定期报告" in str(ann.get("category", "")):
+            continue
+        try:
+            content = fetch_announcement_content(ts_code, title[:8])
+            if content and len(content) > 100 and "未查到" not in content:
+                pack[f"公告全文: {title[:30]}"] = content[:2000]
+        except Exception:
+            pass
+
+    # 2. 主营业务构成
+    try:
+        mainbiz = get_mainbiz_detail(ts_code)
+        if mainbiz and "无主营" not in mainbiz:
+            pack["主营业务构成"] = mainbiz
+    except Exception:
+        pass
+
+    # 3. 评级历史
+    try:
+        ratings = get_report_rating(ts_code, days=365)
+        if ratings and "无研报评级" not in ratings:
+            pack["券商评级"] = ratings
+    except Exception:
+        pass
+
+    # 4. 产业链 → 提取行业关键词 → 搜行业研报
+    try:
+        chain_text = get_industry_chain(ts_code)
+        if chain_text and "查询失败" not in chain_text:
+            pack["产业链"] = chain_text
+            keywords_to_search: list[str] = []
+            for line in chain_text.split("\n"):
+                if "匹配产业链关键词" in line:
+                    kws = line.split(":")[-1].strip().split(",")
+                    keywords_to_search.extend([k.strip() for k in kws[:3]])
+                if "下游" in line:
+                    downs = line.split(":")[-1].strip().split(",")
+                    keywords_to_search.extend([d.strip() for d in downs[:2]])
+
+            for kw in keywords_to_search[:4]:
+                if kw and len(kw) >= 2:
+                    try:
+                        result = search_reports(kw)
+                        if result and "未找到" not in result:
+                            pack[f"行业研报({kw})"] = result[:1500]
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    # 5. 个股新闻
+    try:
+        news = fetch_stock_news(ts_code, stock_name)
+        if news and "无个股新闻" not in news[:30]:
+            pack["个股新闻"] = news[:1500]
+    except Exception:
+        pass
+
+    log.info("Phase 2 研究资料包: %d 项 (%s)", len(pack), ", ".join(pack.keys()))
+    return pack
+
+
 def _run_phase1(
     ts_code: str,
     trade_date: str,
@@ -263,6 +343,7 @@ def _run_phase2(
     trade_date: str,
     stock_name: str,
     phase1_result: dict,
+    phase1_data: dict | None = None,
 ) -> dict:
     """Phase 2：针对性取证，使用 tools 获取数据验证假设。"""
     system_prompt = _load_prompt("hypothesis_phase2.md")
@@ -270,11 +351,29 @@ def _run_phase2(
     questions_text = "\n".join(
         f"{i+1}. {q}" for i, q in enumerate(phase1_result.get("questions", []))
     )
+
+    # 收集研究资料包
+    research_pack: dict[str, str] = {}
+    if phase1_data:
+        try:
+            research_pack = _fetch_phase2_data(ts_code, trade_date, stock_name, phase1_data)
+        except Exception as exc:
+            log.warning("_fetch_phase2_data 异常: %s", exc)
+
+    pack_text = ""
+    if research_pack:
+        pack_sections = []
+        for key, value in research_pack.items():
+            pack_sections.append(f"### {key}\n{value}")
+        pack_text = "\n\n---\n\n".join(pack_sections)
+
     user_message = (
         f"股票：{stock_name}（{ts_code}），交易日期：{trade_date}\n\n"
         f"投资假设：{phase1_result.get('hypothesis', '')}\n\n"
         f"待验证问题：\n{questions_text}"
     )
+    if pack_text:
+        user_message += f"\n\n---\n\n## 已自动收集的研究资料包\n\n{pack_text}"
 
     tier = get_tier_config("hypothesis_verify")
 
@@ -284,7 +383,7 @@ def _run_phase2(
         tools=ALL_TOOLS,
         tool_functions=TOOL_FUNCTIONS,
         tier_config=tier,
-        max_rounds=3,
+        max_rounds=5,
     )
 
     content = response.get("content", "")
@@ -316,6 +415,7 @@ def _run_phase2(
             result["raw_tool_evidence"] = tool_evidence[:5000]
 
     result["tool_calls_made"] = tool_calls_made
+    result["_research_pack"] = research_pack
     return result
 
 
@@ -325,6 +425,7 @@ def _run_phase3(
     phase1_result: dict,
     phase2_result: dict,
     phase1_data: dict,
+    research_pack: dict | None = None,
 ) -> dict:
     """Phase 3：逻辑判断，综合正反证据给出最终结论。"""
     system_prompt = _load_prompt("hypothesis_phase3.md")
@@ -332,17 +433,24 @@ def _run_phase3(
     verifications = phase2_result.get("verifications", [])
     ver_text = json.dumps(verifications, ensure_ascii=False, default=str)
 
-    # 如果有原始工具证据（Phase 2 JSON 解析失败时生成），附加给 Phase 3
-    raw_evidence = phase2_result.get("raw_tool_evidence", "")
-    tool_evidence_summary = ""
-    if raw_evidence:
-        tool_evidence_summary = f"\n\n原始工具证据（Phase 2 工具调用返回的关键数据）：\n{raw_evidence[:4000]}"
-    elif all(v.get("verdict") == "inconclusive" for v in verifications):
-        tool_evidence_summary = "\n\n原始工具证据：\n" + _summarize_tool_evidence(
-            phase2_result.get("tool_calls_made", [])
-        )[:4000]
+    # Phase 2 tool_calls 原始结果（每条取前 300 字）
+    tool_calls_made = phase2_result.get("tool_calls_made", [])
+    tool_evidence_parts: list[str] = []
+    for tc in tool_calls_made:
+        name = tc.get("name", "")
+        result = tc.get("result", "")
+        if result and len(result) > 10:
+            tool_evidence_parts.append(f"[{name}] {result[:300]}")
+    tool_evidence_summary = "\n---\n".join(tool_evidence_parts)
 
-    basic_info = {}
+    # 如果有 raw_tool_evidence（Phase 2 JSON 解析失败时），优先用
+    raw_evidence = phase2_result.get("raw_tool_evidence", "")
+    if raw_evidence:
+        tool_evidence_summary = raw_evidence[:4000]
+    elif all(v.get("verdict") == "inconclusive" for v in verifications) and not tool_evidence_summary:
+        tool_evidence_summary = _summarize_tool_evidence(tool_calls_made)[:4000]
+
+    basic_info: dict = {}
     if "daily_basic" in phase1_data:
         db = phase1_data["daily_basic"]
         basic_info = {
@@ -355,14 +463,43 @@ def _run_phase3(
         basic_info["roe"] = fi.get("roe")
         basic_info["grossprofit_margin"] = fi.get("grossprofit_margin")
 
+    # 研究资料包摘要（key 列表 + 重要数据项前 200 字）
+    pack_summary = ""
+    if research_pack:
+        pack_parts = []
+        for key, value in research_pack.items():
+            pack_parts.append(f"### {key}\n{value[:300]}")
+        pack_summary = "\n\n".join(pack_parts)
+
+    # fina_mainbz 数据
+    mainbz_text = ""
+    try:
+        fina_mainbz = tushare_client.get_fina_mainbz(ts_code=ts_code, period="", type="P")
+        if fina_mainbz["status"] == "ok" and fina_mainbz["data"]:
+            bz_lines = []
+            for bz in fina_mainbz["data"]:
+                name = bz.get("bz_item", "")
+                sales = float(bz.get("bz_sales", 0) or 0)
+                profit = float(bz.get("bz_profit", 0) or 0)
+                margin = (profit / sales * 100) if sales > 0 else 0
+                bz_lines.append(f"  {name}: 营收{sales/1e8:.2f}亿, 毛利率{margin:.1f}%")
+            mainbz_text = "\n".join(bz_lines)
+    except Exception:
+        pass
+
     user_message = (
         f"股票：{stock_name}（{ts_code}）\n\n"
         f"投资假设：{phase1_result.get('hypothesis', '')}\n"
         f"假设类型：{phase1_result.get('stock_type', '')}\n\n"
         f"验证结果：\n{ver_text}\n\n"
         f"基础指标：{json.dumps(basic_info, ensure_ascii=False, default=str)}"
-        f"{tool_evidence_summary}"
     )
+    if mainbz_text:
+        user_message += f"\n\n主营业务构成（按产品）：\n{mainbz_text}"
+    if tool_evidence_summary:
+        user_message += f"\n\nPhase 2 工具调用原始证据：\n{tool_evidence_summary[:4000]}"
+    if pack_summary:
+        user_message += f"\n\n研究资料包摘要：\n{pack_summary[:4000]}"
 
     tier = get_tier_config("hypothesis_judge")
     response = call_kimi(messages=[
@@ -396,12 +533,68 @@ def _run_phase3(
         "catalyst": "",
         "suggestion": "",
         "position_type": "watch",
+        "valuation": {},
+        "upgrade_trigger": "",
+        "kill_criteria": "",
     }
     for k, v in defaults.items():
         if k not in result:
             result[k] = v
 
     return result
+
+
+def _run_critic_followup(
+    output: dict,
+    ts_code: str,
+    trade_date: str,
+    stock_name: str,
+    phase1_result: dict,
+) -> None:
+    """Critic 闭环：提取 major unverified challenges，补充查询后合并结果。"""
+    critic = output.get("critic", {})
+    challenges = critic.get("challenges", [])
+    major_unverified = [
+        c for c in challenges
+        if c.get("unverified") is True and c.get("severity") in ("major", "critical")
+    ]
+    if len(major_unverified) < 2:
+        return
+
+    supplement_qs = [c.get("challenge", "") for c in major_unverified[:3]]
+    log.info("Critic 闭环: %d 条 major unverified → 补充查询", len(supplement_qs))
+
+    questions_text = "\n".join(f"{i+1}. {q}" for i, q in enumerate(supplement_qs))
+    system_prompt = _load_prompt("hypothesis_phase2.md")
+    user_message = (
+        f"股票：{stock_name}（{ts_code}），交易日期：{trade_date}\n\n"
+        f"投资假设：{phase1_result.get('hypothesis', '')}\n\n"
+        f"补充验证问题（来自 Critic 审查）：\n{questions_text}\n\n"
+        "请针对以上问题做补充搜索验证。"
+    )
+
+    tier = get_tier_config("hypothesis_verify")
+    try:
+        resp = run_agent_with_tools(
+            system_prompt=system_prompt,
+            user_message=user_message,
+            tools=ALL_TOOLS,
+            tool_functions=TOOL_FUNCTIONS,
+            tier_config=tier,
+            max_rounds=2,
+        )
+        supplement_content = resp.get("content", "")
+        supplement_tools = resp.get("tool_calls_made", [])
+        supplement_result = _extract_json(supplement_content)
+
+        output["critic_followup"] = {
+            "questions": supplement_qs,
+            "tool_calls_made": supplement_tools,
+            "result": supplement_result or {"raw_content": supplement_content[:2000]},
+        }
+        log.info("Critic 闭环完成: %d 次工具调用", len(supplement_tools))
+    except Exception as exc:
+        log.warning("Critic 闭环补充查询失败: %s", exc)
 
 
 def run_hypothesis_analysis(
@@ -428,6 +621,14 @@ def run_hypothesis_analysis(
         "trigger_reason": trigger_reason,
     }
 
+    # M0.3：入口处校验 ts_code / stock_name 一致性，不通过直接 raise（不浪费 12 分钟跑错）
+    from tools.symbol_resolver import validate as _validate_symbol, SymbolMismatchError as _SymbolMismatch
+    _v = _validate_symbol(ts_code, stock_name)
+    if not _v["valid"]:
+        raise _SymbolMismatch(
+            f"ts_code/name 不一致: {_v['error']}; suggestions: {_v['suggestions']}"
+        )
+
     try:
         phase1_data = _fetch_phase1_data(ts_code, trade_date, stock_name=stock_name)
         output["phase1_data_keys"] = list(phase1_data.keys())
@@ -453,16 +654,19 @@ def run_hypothesis_analysis(
         }
         return output
 
+    research_pack: dict[str, str] = {}
     try:
-        p2 = _run_phase2(ts_code, trade_date, stock_name, p1)
+        p2 = _run_phase2(ts_code, trade_date, stock_name, p1, phase1_data=phase1_data)
         output["phase2"] = p2
+        research_pack = p2.pop("_research_pack", {})
+        output["phase2_research_pack_keys"] = list(research_pack.keys())
     except Exception as e:
         p2 = {"verifications": [], "tool_calls_made": []}
         output["phase2"] = p2
         output["phase2_error"] = str(e)
 
     try:
-        p3 = _run_phase3(ts_code, stock_name, p1, p2, phase1_data)
+        p3 = _run_phase3(ts_code, stock_name, p1, p2, phase1_data, research_pack=research_pack)
         output["phase3"] = p3
     except Exception as e:
         output["phase3"] = {
@@ -492,6 +696,12 @@ def run_hypothesis_analysis(
         output["critic_recommendation"] = output["critic"]["recommendation"]
         output["adjusted_confidence"] = output["critic"]["adjusted_confidence"]
         output["critic_error"] = str(e)
+
+    # Critic 闭环：提取 unverified major challenges，补充查询
+    try:
+        _run_critic_followup(output, ts_code, trade_date, stock_name, p1)
+    except Exception as exc:
+        log.warning("Critic 闭环异常: %s", exc)
 
     data_sources = set()
     data_sources.update(phase1_data.keys())

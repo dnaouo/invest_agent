@@ -59,9 +59,15 @@ _CRITIC_RESULT = {
 @pytest.fixture(autouse=True)
 def _patch_tushare():
     import harness.hypothesis_engine as mod
+    import tools.symbol_resolver as symbol_resolver
+    import pandas as pd
+    _stock_basic_df = pd.DataFrame([
+        {"ts_code": "002428.SZ", "name": "云南锗业"},
+    ])
     with patch.object(mod, "tushare_client") as mock_ts, \
          patch.object(mod, "search_news_for_stock", return_value=_NEWS_RESULT), \
-         patch.object(mod, "extract_mainbz_keywords", return_value=["锗", "化合物半导体"]):
+         patch.object(mod, "extract_mainbz_keywords", return_value=["锗", "化合物半导体"]), \
+         patch.object(symbol_resolver, "_fetch_stock_basic", return_value=_stock_basic_df):
         mock_ts.get_fina_indicator.return_value = _FINA_OK
         mock_ts.get_daily_basic.return_value = _DAILY_BASIC_OK
         mock_ts.get_ths_index.return_value = _THS_INDEX_OK
