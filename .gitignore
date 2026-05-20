@@ -21,8 +21,11 @@ htmlcov/
 # Environment
 .env
 
-# Data
-data/
+# Local Cursor/MCP configuration may contain tokens
+.cursor/
+
+# Data (only root-level data/ directory, not src/sandboxes/data/)
+/data/
 
 # IDE
 .idea/
